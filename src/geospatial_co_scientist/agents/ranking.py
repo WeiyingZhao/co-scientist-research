@@ -1,6 +1,5 @@
 """Ranking Agent for hypothesis prioritization using Elo rating."""
 
-import json
 import logging
 import random
 from typing import Optional
@@ -9,6 +8,7 @@ from geospatial_co_scientist.agents.base import BaseAgent
 from geospatial_co_scientist.config import get_settings
 from geospatial_co_scientist.models.hypothesis import HypothesisRanking, HypothesisStatus
 from geospatial_co_scientist.models.state import AgentType, CoScientistState
+from geospatial_co_scientist.utils.json_utils import parse_json_dict
 
 logger = logging.getLogger(__name__)
 
@@ -222,15 +222,14 @@ class RankingAgent(BaseAgent):
         id_a: str,
         id_b: str
     ) -> HypothesisRanking:
-        """Parse comparison response."""
-        try:
-            start_idx = response.find("{")
-            end_idx = response.rfind("}") + 1
+        """Parse comparison response.
 
-            if start_idx != -1 and end_idx > start_idx:
-                json_str = response[start_idx:end_idx]
-                data = json.loads(json_str)
+        Uses robust JSON parsing to handle common LLM output issues.
+        """
+        data = parse_json_dict(response, default=None)
 
+        if data:
+            try:
                 winner = data.get("winner", "A")
                 winner_id = id_a if winner == "A" else id_b
                 confidence = data.get("confidence", 0.6)
@@ -248,11 +247,11 @@ class RankingAgent(BaseAgent):
                         p.get("criterion", "") for p in data.get("comparison_points", [])
                     ]
                 )
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse comparison JSON: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to create ranking from parsed data: {e}")
 
         # Fallback: random winner with low confidence
+        logger.info("Using fallback ranking with random selection")
         return HypothesisRanking(
             hypothesis_a_id=id_a,
             hypothesis_b_id=id_b,

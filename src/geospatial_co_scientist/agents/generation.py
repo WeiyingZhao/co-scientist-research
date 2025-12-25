@@ -1,6 +1,5 @@
 """Generation Agent for hypothesis generation."""
 
-import json
 import logging
 from typing import Any, Optional
 
@@ -12,6 +11,7 @@ from geospatial_co_scientist.tools.literature_search import (
     GeospatialLiteratureSearch,
     search_semantic_scholar,
 )
+from geospatial_co_scientist.utils.json_utils import parse_json_list
 
 logger = logging.getLogger(__name__)
 
@@ -92,16 +92,29 @@ Output as JSON array with the following structure for each hypothesis:
 
 
 class GenerationAgent(ToolUsingAgent):
-    """Agent responsible for generating research hypotheses."""
+    """Agent responsible for generating research hypotheses.
+
+    Supports dependency injection of tools and services for improved testability.
+
+    Args:
+        tools: Optional list of tools. Defaults to [search_semantic_scholar].
+        literature_search: Optional GeospatialLiteratureSearch instance.
+        **kwargs: Additional arguments passed to ToolUsingAgent.
+    """
 
     agent_type = AgentType.GENERATION
     default_model = "gpt-4-turbo-preview"
+    default_tools = [search_semantic_scholar]
 
-    def __init__(self, **kwargs):
-        tools = [search_semantic_scholar]
-        super().__init__(tools=tools, **kwargs)
+    def __init__(
+        self,
+        literature_search: Optional[GeospatialLiteratureSearch] = None,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
         self.settings = get_settings()
-        self.literature_search = GeospatialLiteratureSearch()
+        # Use injected literature_search or create default
+        self.literature_search = literature_search or GeospatialLiteratureSearch()
 
     @property
     def system_prompt(self) -> str:
@@ -181,20 +194,19 @@ class GenerationAgent(ToolUsingAgent):
         response: str,
         state: CoScientistState
     ) -> list[Hypothesis]:
-        """Parse LLM response into Hypothesis objects."""
+        """Parse LLM response into Hypothesis objects.
+
+        Uses robust JSON parsing to handle common LLM output issues like
+        Markdown code blocks, truncated JSON, and formatting errors.
+        """
         hypotheses = []
 
-        # Try to extract JSON from response
-        try:
-            # Find JSON array in response
-            start_idx = response.find("[")
-            end_idx = response.rfind("]") + 1
+        # Use robust JSON parsing
+        data = parse_json_list(response, default=[])
 
-            if start_idx != -1 and end_idx > start_idx:
-                json_str = response[start_idx:end_idx]
-                data = json.loads(json_str)
-
-                for item in data:
+        if data:
+            for item in data:
+                try:
                     hyp = Hypothesis(
                         goal_id=state.research_goal.get("id", "unknown"),
                         title=item.get("title", "Untitled"),
@@ -209,9 +221,11 @@ class GenerationAgent(ToolUsingAgent):
                         generation_iteration=state.current_iteration
                     )
                     hypotheses.append(hyp)
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse JSON: {e}, attempting text extraction")
+                except Exception as e:
+                    logger.warning(f"Failed to create hypothesis from item: {e}")
+                    continue
+        else:
+            logger.warning("JSON parsing returned empty list, attempting text extraction")
             # Fallback: try to extract hypotheses from text
             hypotheses = self._extract_hypotheses_from_text(response, state)
 

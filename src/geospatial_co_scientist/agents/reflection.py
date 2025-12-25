@@ -1,6 +1,5 @@
 """Reflection Agent for hypothesis review and critique."""
 
-import json
 import logging
 from typing import Optional
 
@@ -13,6 +12,7 @@ from geospatial_co_scientist.models.hypothesis import (
 )
 from geospatial_co_scientist.models.state import AgentType, CoScientistState
 from geospatial_co_scientist.tools.literature_search import search_semantic_scholar
+from geospatial_co_scientist.utils.json_utils import parse_json_dict
 
 logger = logging.getLogger(__name__)
 
@@ -93,14 +93,21 @@ Output as JSON:
 
 
 class ReflectionAgent(ToolUsingAgent):
-    """Agent responsible for critically reviewing hypotheses."""
+    """Agent responsible for critically reviewing hypotheses.
+
+    Supports dependency injection of tools for improved testability.
+
+    Args:
+        tools: Optional list of tools. Defaults to [search_semantic_scholar].
+        **kwargs: Additional arguments passed to ToolUsingAgent.
+    """
 
     agent_type = AgentType.REFLECTION
     default_model = "gpt-4-turbo-preview"
+    default_tools = [search_semantic_scholar]
 
     def __init__(self, **kwargs):
-        tools = [search_semantic_scholar]
-        super().__init__(tools=tools, **kwargs)
+        super().__init__(**kwargs)
         self.settings = get_settings()
 
     @property
@@ -210,16 +217,16 @@ class ReflectionAgent(ToolUsingAgent):
         hypothesis_id: str,
         is_initial: bool
     ) -> HypothesisReview:
-        """Parse LLM response into HypothesisReview."""
-        try:
-            # Extract JSON from response
-            start_idx = response.find("{")
-            end_idx = response.rfind("}") + 1
+        """Parse LLM response into HypothesisReview.
 
-            if start_idx != -1 and end_idx > start_idx:
-                json_str = response[start_idx:end_idx]
-                data = json.loads(json_str)
+        Uses robust JSON parsing to handle common LLM output issues like
+        Markdown code blocks, truncated JSON, and formatting errors.
+        """
+        # Use robust JSON parsing
+        data = parse_json_dict(response, default=None)
 
+        if data:
+            try:
                 review = HypothesisReview(
                     hypothesis_id=hypothesis_id,
                     reviewer_type="reflection_agent",
@@ -239,11 +246,11 @@ class ReflectionAgent(ToolUsingAgent):
                 review.calculate_overall_score()
 
                 return review
+            except Exception as e:
+                logger.warning(f"Failed to create review from parsed data: {e}")
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse review JSON: {e}")
-
-        # Fallback: create basic review
+        # Fallback: create basic review with original response as feedback
+        logger.info("Using fallback review parsing")
         return HypothesisReview(
             hypothesis_id=hypothesis_id,
             reviewer_type="reflection_agent",

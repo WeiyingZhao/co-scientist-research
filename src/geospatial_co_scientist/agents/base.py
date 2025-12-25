@@ -12,6 +12,7 @@ from langchain_openai import ChatOpenAI
 
 from geospatial_co_scientist.config import LLMProvider, get_settings
 from geospatial_co_scientist.models.state import AgentType, CoScientistState
+from geospatial_co_scientist.utils.tracing import TracingContext, log_agent_action
 
 logger = logging.getLogger(__name__)
 
@@ -108,12 +109,18 @@ class BaseAgent(ABC):
             HumanMessage(content=input_text)
         ]
 
-        try:
-            response = await self.llm.ainvoke(messages)
-            return response.content
-        except Exception as e:
-            logger.error(f"Agent {self.agent_type} failed: {e}")
-            raise
+        async with TracingContext(
+            name=f"{self.agent_type.value}_invoke",
+            run_type="llm",
+            tags=[self.agent_type.value],
+            metadata={"model": self.model_name, "input_length": len(input_text)}
+        ):
+            try:
+                response = await self.llm.ainvoke(messages)
+                return response.content
+            except Exception as e:
+                logger.error(f"Agent {self.agent_type} failed: {e}")
+                raise
 
     def invoke_sync(
         self,
@@ -149,10 +156,8 @@ class BaseAgent(ABC):
         pass
 
     def log_action(self, action: str, details: Optional[dict] = None):
-        """Log an agent action."""
-        logger.info(f"[{self.agent_type.value}] {action}")
-        if details:
-            logger.debug(f"[{self.agent_type.value}] Details: {details}")
+        """Log an agent action with consistent formatting."""
+        log_agent_action(self.agent_type.value, action, details)
 
     def add_message_to_state(
         self,
@@ -184,11 +189,20 @@ class BaseAgent(ABC):
 
 
 class ToolUsingAgent(BaseAgent):
-    """Base class for agents that use tools."""
+    """Base class for agents that use tools.
+
+    Supports dependency injection of tools for improved testability.
+    Tools can be passed during initialization or will default to
+    the class-level default_tools if defined.
+    """
+
+    # Subclasses can override this to provide default tools
+    default_tools: list = []
 
     def __init__(self, tools: Optional[list] = None, **kwargs):
         super().__init__(**kwargs)
-        self.tools = tools or []
+        # Use provided tools, or fall back to class defaults
+        self.tools = tools if tools is not None else self.default_tools.copy()
 
     def _create_llm(self) -> BaseChatModel:
         """Create LLM with tool binding."""

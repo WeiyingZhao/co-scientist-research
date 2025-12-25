@@ -7,6 +7,10 @@ from geospatial_co_scientist.agents.base import BaseAgent
 from geospatial_co_scientist.config import get_settings
 from geospatial_co_scientist.models.research import LiteratureSummary, ResearchGoal
 from geospatial_co_scientist.models.state import AgentType, CoScientistState
+from geospatial_co_scientist.orchestration.workflow_config import (
+    WorkflowConfiguration,
+    get_workflow_config,
+)
 from geospatial_co_scientist.tools.literature_search import GeospatialLiteratureSearch
 
 logger = logging.getLogger(__name__)
@@ -34,15 +38,31 @@ Guide the process efficiently while ensuring high-quality scientific outputs."""
 
 
 class SupervisorAgent(BaseAgent):
-    """Supervisor agent that coordinates the multi-agent workflow."""
+    """Supervisor agent that coordinates the multi-agent workflow.
+
+    Supports dependency injection of services for improved testability.
+    Uses configurable workflow transitions for flexible routing.
+
+    Args:
+        literature_search: Optional GeospatialLiteratureSearch instance.
+        workflow_config: Optional WorkflowConfiguration for custom routing.
+        **kwargs: Additional arguments passed to BaseAgent.
+    """
 
     agent_type = AgentType.SUPERVISOR
     default_model = "gpt-4-turbo-preview"
 
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        literature_search: Optional[GeospatialLiteratureSearch] = None,
+        workflow_config: Optional[WorkflowConfiguration] = None,
+        **kwargs
+    ):
         super().__init__(**kwargs)
         self.settings = get_settings()
-        self.literature_search = GeospatialLiteratureSearch()
+        # Use injected services or create defaults
+        self.literature_search = literature_search or GeospatialLiteratureSearch()
+        self.workflow_config = workflow_config or get_workflow_config()
 
     @property
     def system_prompt(self) -> str:
@@ -81,56 +101,21 @@ class SupervisorAgent(BaseAgent):
         return state
 
     def _determine_next_agent(self, state: CoScientistState) -> Optional[AgentType]:
-        """Determine which agent should run next based on state."""
-        # Initial literature review if not done
-        if not state.literature_summary:
-            return AgentType.LITERATURE_SEARCH
+        """Determine which agent should run next based on state.
 
-        # Generate hypotheses if none exist
-        if not state.hypotheses:
-            return AgentType.GENERATION
+        Uses the configurable workflow transitions to determine routing.
+        This allows for flexible workflow modifications without code changes.
+        """
+        next_agent = self.workflow_config.get_next_agent(state)
 
-        # Review hypotheses if unreviewed exist
-        reviewed_ids = {r.get("hypothesis_id") for r in state.hypothesis_reviews}
-        unreviewed = [h for h in state.hypotheses if h.get("id") not in reviewed_ids]
-        if unreviewed:
-            return AgentType.REFLECTION
+        # Handle iteration increment for new generation cycles
+        if next_agent == AgentType.GENERATION and state.hypotheses:
+            # Check if this is a new iteration (not the initial generation)
+            # by seeing if we've completed a cycle
+            if state.current_iteration < state.max_iterations:
+                state.current_iteration += 1
 
-        # Rank if reviews exist but not enough rankings
-        if len(state.hypothesis_rankings) < len(state.hypotheses) - 1:
-            return AgentType.RANKING
-
-        # Proximity analysis if not done this iteration
-        if not state.hypothesis_clusters or state.current_iteration > 1:
-            # Check if we need fresh proximity analysis
-            return AgentType.PROXIMITY
-
-        # Evolution for top hypotheses
-        if state.current_iteration < state.max_iterations:
-            evolved_this_iteration = [
-                h for h in state.hypotheses
-                if h.get("generation_iteration") == state.current_iteration
-                and h.get("parent_hypothesis_id")
-            ]
-            if not evolved_this_iteration and state.top_hypotheses:
-                return AgentType.EVOLUTION
-
-        # Experiment design for top hypotheses
-        designed_ids = {d.get("hypothesis_id") for d in state.experiment_designs}
-        need_designs = [hid for hid in state.top_hypotheses[:3] if hid not in designed_ids]
-        if need_designs:
-            return AgentType.EXPERIMENT_DESIGN
-
-        # Meta-review periodically or at end
-        if state.current_iteration >= state.max_iterations:
-            return AgentType.META_REVIEW
-
-        # Start new iteration
-        if state.current_iteration < state.max_iterations:
-            state.current_iteration += 1
-            return AgentType.GENERATION
-
-        return AgentType.META_REVIEW
+        return next_agent
 
     def _should_stop(self, state: CoScientistState) -> bool:
         """Determine if the workflow should stop."""
