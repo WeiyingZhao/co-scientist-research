@@ -81,6 +81,20 @@ class Settings(BaseSettings):
         description="Maximum number of search results to retrieve"
     )
 
+    # Web search
+    web_search_provider: str = Field(
+        default="duckduckgo",
+        description="Web search provider (duckduckgo, tavily, serper)"
+    )
+    tavily_api_key: Optional[str] = Field(
+        default=None,
+        description="Tavily API key for web search"
+    )
+    serper_api_key: Optional[str] = Field(
+        default=None,
+        description="Serper API key for web search"
+    )
+
     # Vector store
     vector_store_type: str = Field(
         default="chroma",

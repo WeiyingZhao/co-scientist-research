@@ -1,6 +1,5 @@
 """Evolution Agent for hypothesis refinement and improvement."""
 
-import json
 import logging
 from typing import Optional
 
@@ -12,6 +11,7 @@ from geospatial_co_scientist.models.hypothesis import (
     HypothesisStatus,
 )
 from geospatial_co_scientist.models.state import AgentType, CoScientistState
+from geospatial_co_scientist.utils.json_utils import parse_json_dict
 
 logger = logging.getLogger(__name__)
 
@@ -228,15 +228,14 @@ class EvolutionAgent(BaseAgent):
         original: dict,
         state: CoScientistState
     ) -> Optional[Hypothesis]:
-        """Parse the evolved hypothesis from LLM response."""
-        try:
-            start_idx = response.find("{")
-            end_idx = response.rfind("}") + 1
+        """Parse the evolved hypothesis from LLM response.
 
-            if start_idx != -1 and end_idx > start_idx:
-                json_str = response[start_idx:end_idx]
-                data = json.loads(json_str)
+        Uses robust JSON parsing to handle common LLM output issues.
+        """
+        data = parse_json_dict(response, default=None)
 
+        if data:
+            try:
                 evolved = Hypothesis(
                     goal_id=original.get("goal_id", "unknown"),
                     title=data.get("title", original.get("title", "")),
@@ -268,9 +267,8 @@ class EvolutionAgent(BaseAgent):
                 )
 
                 return evolved
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse evolved hypothesis JSON: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to create evolved hypothesis from parsed data: {e}")
 
         return None
 

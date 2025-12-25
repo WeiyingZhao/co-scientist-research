@@ -1,5 +1,6 @@
 """LangGraph workflow nodes for each agent."""
 
+import asyncio
 import logging
 from typing import Any, Callable
 
@@ -263,3 +264,116 @@ def create_node_functions() -> dict[str, Callable]:
         "literature_search": literature_search_node,
         "human_review": human_review_node,
     }
+
+
+async def run_agents_parallel(
+    state: dict[str, Any],
+    agent_types: list[AgentType]
+) -> dict[str, Any]:
+    """Run multiple agents in parallel and merge their state updates.
+
+    This function enables concurrent execution of independent agents,
+    improving performance when agents don't have dependencies on each other.
+
+    Args:
+        state: Current workflow state
+        agent_types: List of agent types to run in parallel
+
+    Returns:
+        Merged state from all agents
+
+    Note:
+        State merging strategy:
+        - Lists (hypotheses, reviews, etc.) are concatenated
+        - Dicts (statistics, etc.) are merged
+        - Scalar values take the last write
+    """
+    logger.info(f"Running agents in parallel: {[a.value for a in agent_types]}")
+
+    async def run_single_agent(agent_type: AgentType) -> dict[str, Any]:
+        """Run a single agent and return its state updates."""
+        current_state = CoScientistState(**state)
+        current_state.current_agent = agent_type
+
+        agent = get_agent(agent_type)
+        if agent:
+            updated_state = await agent.process(current_state)
+            return updated_state.model_dump()
+        return state
+
+    # Run all agents concurrently
+    tasks = [run_single_agent(agent_type) for agent_type in agent_types]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Filter out exceptions and log them
+    valid_results = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(f"Agent {agent_types[i].value} failed: {result}")
+        else:
+            valid_results.append(result)
+
+    if not valid_results:
+        return state
+
+    # Merge results
+    return _merge_parallel_states(state, valid_results)
+
+
+def _merge_parallel_states(
+    original_state: dict[str, Any],
+    agent_states: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Merge states from parallel agent execution.
+
+    Args:
+        original_state: The state before parallel execution
+        agent_states: List of states from each agent
+
+    Returns:
+        Merged state combining all agent updates
+    """
+    # Start with a copy of the original state
+    merged = dict(original_state)
+
+    # Fields that should be merged as lists (appended)
+    list_fields = [
+        "hypothesis_rankings",
+        "hypothesis_clusters",
+        "messages",
+        "errors",
+        "warnings",
+    ]
+
+    # Fields that should be merged as dicts
+    dict_fields = ["statistics"]
+
+    for agent_state in agent_states:
+        for key, value in agent_state.items():
+            if key in list_fields:
+                # Append new items that don't exist in original
+                original_items = original_state.get(key, [])
+                new_items = [item for item in value if item not in original_items]
+                merged[key] = merged.get(key, []) + new_items
+            elif key in dict_fields:
+                # Merge dictionaries
+                merged[key] = {**merged.get(key, {}), **value}
+            else:
+                # For other fields, take the agent's value if changed
+                if value != original_state.get(key):
+                    merged[key] = value
+
+    return merged
+
+
+async def parallel_ranking_proximity_node(state: dict[str, Any]) -> dict[str, Any]:
+    """Run ranking and proximity analysis in parallel.
+
+    This is an optimized node that combines ranking and proximity
+    analysis into a single parallel execution step.
+    """
+    logger.info("Executing parallel ranking+proximity node")
+    return await run_agents_parallel(
+        state,
+        [AgentType.RANKING, AgentType.PROXIMITY]
+    )

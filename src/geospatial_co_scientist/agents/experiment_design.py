@@ -1,6 +1,5 @@
 """Experiment Design Agent for creating testing plans for hypotheses."""
 
-import json
 import logging
 from typing import Optional
 
@@ -20,6 +19,7 @@ from geospatial_co_scientist.tools.geospatial import (
     get_analysis_methodology,
     get_dataset_recommendations,
 )
+from geospatial_co_scientist.utils.json_utils import parse_json_dict
 
 logger = logging.getLogger(__name__)
 
@@ -111,14 +111,21 @@ Output as JSON:
 
 
 class ExperimentDesignAgent(ToolUsingAgent):
-    """Agent responsible for designing experiments to test hypotheses."""
+    """Agent responsible for designing experiments to test hypotheses.
+
+    Supports dependency injection of tools for improved testability.
+
+    Args:
+        tools: Optional list of tools. Defaults to geospatial analysis tools.
+        **kwargs: Additional arguments passed to ToolUsingAgent.
+    """
 
     agent_type = AgentType.EXPERIMENT_DESIGN
     default_model = "gpt-4-turbo-preview"
+    default_tools = [get_dataset_recommendations, get_analysis_methodology, generate_analysis_code]
 
     def __init__(self, **kwargs):
-        tools = [get_dataset_recommendations, get_analysis_methodology, generate_analysis_code]
-        super().__init__(tools=tools, **kwargs)
+        super().__init__(**kwargs)
         self.settings = get_settings()
 
     @property
@@ -205,15 +212,14 @@ class ExperimentDesignAgent(ToolUsingAgent):
         response: str,
         hypothesis_id: str
     ) -> Optional[ExperimentDesign]:
-        """Parse experiment design from LLM response."""
-        try:
-            start_idx = response.find("{")
-            end_idx = response.rfind("}") + 1
+        """Parse experiment design from LLM response.
 
-            if start_idx != -1 and end_idx > start_idx:
-                json_str = response[start_idx:end_idx]
-                data = json.loads(json_str)
+        Uses robust JSON parsing to handle common LLM output issues.
+        """
+        data = parse_json_dict(response, default=None)
 
+        if data:
+            try:
                 # Parse data requirements
                 data_reqs = []
                 for req in data.get("data_requirements", []):
@@ -270,9 +276,8 @@ class ExperimentDesignAgent(ToolUsingAgent):
                 )
 
                 return design
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse experiment design JSON: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to create experiment design from parsed data: {e}")
 
         return None
 

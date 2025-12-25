@@ -267,10 +267,207 @@ async def search_semantic_scholar(query: str, limit: int = 10) -> list[dict[str,
     return [r.model_dump() for r in results]
 
 
+class WebSearchTool:
+    """Tool for web search with support for multiple providers."""
+
+    def __init__(self):
+        self.settings = get_settings()
+        self.client = httpx.AsyncClient(timeout=30.0)
+
+    async def close(self):
+        """Close the HTTP client."""
+        await self.client.aclose()
+
+    async def search(
+        self,
+        query: str,
+        num_results: int = 5
+    ) -> list[dict[str, Any]]:
+        """
+        Search the web using the configured provider.
+
+        Args:
+            query: Search query
+            num_results: Number of results to return
+
+        Returns:
+            List of search results with title, url, and snippet
+        """
+        provider = self.settings.web_search_provider.lower()
+
+        if provider == "tavily" and self.settings.tavily_api_key:
+            return await self._search_tavily(query, num_results)
+        elif provider == "serper" and self.settings.serper_api_key:
+            return await self._search_serper(query, num_results)
+        else:
+            # Default to DuckDuckGo (no API key required)
+            return await self._search_duckduckgo(query, num_results)
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10)
+    )
+    async def _search_duckduckgo(
+        self,
+        query: str,
+        num_results: int = 5
+    ) -> list[dict[str, Any]]:
+        """
+        Search using DuckDuckGo HTML interface.
+
+        This is a simple implementation that doesn't require an API key.
+        """
+        import re
+        from urllib.parse import quote_plus, unquote
+
+        url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+
+        try:
+            response = await self.client.get(url, headers=headers, follow_redirects=True)
+            response.raise_for_status()
+            html = response.text
+
+            results = []
+            # Extract results using regex (simple HTML parsing)
+            # Look for result links and snippets
+            result_pattern = r'<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([^<]+)</a>'
+            snippet_pattern = r'<a class="result__snippet"[^>]*>([^<]+(?:<[^/][^>]*>[^<]*</[^>]*>)*[^<]*)</a>'
+
+            links = re.findall(result_pattern, html)
+            snippets = re.findall(snippet_pattern, html)
+
+            for i, (link, title) in enumerate(links[:num_results]):
+                # DuckDuckGo uses redirect URLs, extract actual URL
+                if "uddg=" in link:
+                    actual_url = re.search(r'uddg=([^&]+)', link)
+                    if actual_url:
+                        link = unquote(actual_url.group(1))
+
+                snippet = snippets[i] if i < len(snippets) else ""
+                # Clean HTML tags from snippet
+                snippet = re.sub(r'<[^>]+>', '', snippet).strip()
+
+                results.append({
+                    "title": title.strip(),
+                    "url": link,
+                    "snippet": snippet[:500] if snippet else "No description available"
+                })
+
+            if not results:
+                logger.warning("DuckDuckGo search returned no results")
+                return [{
+                    "title": f"No results for: {query}",
+                    "url": "",
+                    "snippet": "Try refining your search query"
+                }]
+
+            return results
+
+        except httpx.HTTPError as e:
+            logger.error(f"DuckDuckGo search failed: {e}")
+            return []
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10)
+    )
+    async def _search_tavily(
+        self,
+        query: str,
+        num_results: int = 5
+    ) -> list[dict[str, Any]]:
+        """Search using Tavily API."""
+        url = "https://api.tavily.com/search"
+
+        payload = {
+            "api_key": self.settings.tavily_api_key,
+            "query": query,
+            "search_depth": "basic",
+            "max_results": num_results
+        }
+
+        try:
+            response = await self.client.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+            results = []
+            for item in data.get("results", []):
+                results.append({
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "snippet": item.get("content", "")[:500]
+                })
+
+            return results
+
+        except httpx.HTTPError as e:
+            logger.error(f"Tavily search failed: {e}")
+            return []
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10)
+    )
+    async def _search_serper(
+        self,
+        query: str,
+        num_results: int = 5
+    ) -> list[dict[str, Any]]:
+        """Search using Serper API."""
+        url = "https://google.serper.dev/search"
+
+        headers = {
+            "X-API-KEY": self.settings.serper_api_key,
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "q": query,
+            "num": num_results
+        }
+
+        try:
+            response = await self.client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+
+            results = []
+            for item in data.get("organic", []):
+                results.append({
+                    "title": item.get("title", ""),
+                    "url": item.get("link", ""),
+                    "snippet": item.get("snippet", "")[:500]
+                })
+
+            return results
+
+        except httpx.HTTPError as e:
+            logger.error(f"Serper search failed: {e}")
+            return []
+
+
+# Singleton instance for web search
+_web_search_tool: Optional[WebSearchTool] = None
+
+
+def get_web_search_tool() -> WebSearchTool:
+    """Get the singleton web search tool instance."""
+    global _web_search_tool
+    if _web_search_tool is None:
+        _web_search_tool = WebSearchTool()
+    return _web_search_tool
+
+
 @tool
 async def search_web(query: str, num_results: int = 5) -> list[dict[str, Any]]:
     """
     Search the web for relevant information.
+
+    Uses the configured web search provider (DuckDuckGo by default,
+    or Tavily/Serper if API keys are configured).
 
     Args:
         query: Search query
@@ -279,16 +476,8 @@ async def search_web(query: str, num_results: int = 5) -> list[dict[str, Any]]:
     Returns:
         List of search results with title, url, and snippet
     """
-    # This would integrate with a web search API (e.g., Tavily, Serper, etc.)
-    # For now, return placeholder
-    logger.warning("Web search not fully implemented - using placeholder")
-    return [
-        {
-            "title": f"Search result for: {query}",
-            "url": "https://example.com",
-            "snippet": "Web search integration pending"
-        }
-    ]
+    tool = get_web_search_tool()
+    return await tool.search(query, num_results)
 
 
 class GeospatialLiteratureSearch(LiteratureSearchTool):
