@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HypothesisStatus(str, Enum):
@@ -80,8 +80,8 @@ class Hypothesis(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "title": "Urban Heat Island Detection via Thermal-NDVI Fusion",
                 "statement": "Urban heat islands can be more accurately detected by combining "
@@ -102,6 +102,7 @@ class Hypothesis(BaseModel):
                 }
             }
         }
+    )
 
 
 class ReviewCriterion(str, Enum):

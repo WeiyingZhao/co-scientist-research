@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DataSourceType(str, Enum):
@@ -37,6 +37,7 @@ class MethodologyType(str, Enum):
     TIME_SERIES_ANALYSIS = "time_series_analysis"
     SPATIAL_ANALYSIS = "spatial_analysis"
     SPECTRAL_ANALYSIS = "spectral_analysis"
+    THERMAL_ANALYSIS = "thermal_analysis"
     REGRESSION_MODELING = "regression_modeling"
     SIMULATION = "simulation"
     FIELD_EXPERIMENT = "field_experiment"
@@ -84,8 +85,8 @@ class DataRequirement(BaseModel):
         description="Cost information if applicable"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "name": "Landsat 8 Thermal Data",
                 "data_type": "satellite_thermal",
@@ -97,6 +98,7 @@ class DataRequirement(BaseModel):
                 "access_method": "USGS EarthExplorer or Google Earth Engine"
             }
         }
+    )
 
 
 class Methodology(BaseModel):
@@ -139,8 +141,8 @@ class Methodology(BaseModel):
         description="Example code snippet for implementation"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "name": "Surface Temperature Extraction from Landsat",
                 "methodology_type": "image_classification",
@@ -155,6 +157,7 @@ class Methodology(BaseModel):
                 "parameters": {"emissivity": "0.95 for urban areas"}
             }
         }
+    )
 
 
 class EvaluationMetric(BaseModel):
