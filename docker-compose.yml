@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # Main application
+  co-scientist:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - GEO_SCIENTIST_LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - GEO_SCIENTIST_OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEO_SCIENTIST_ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GEO_SCIENTIST_VECTOR_STORE_TYPE=chroma
+      - GEO_SCIENTIST_CHROMA_PERSIST_DIRECTORY=/app/data/chroma_db
+      - GEO_SCIENTIST_LOG_LEVEL=INFO
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    depends_on:
+      - chromadb
+    networks:
+      - co-scientist-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ChromaDB for vector storage
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=false
+    networks:
+      - co-scientist-network
+    restart: unless-stopped
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - co-scientist-network
+    restart: unless-stopped
+
+networks:
+  co-scientist-network:
+    driver: bridge
+
+volumes:
+  chroma_data:
+  redis_data:
