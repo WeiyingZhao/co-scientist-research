@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ResearchDomain(str, Enum):
@@ -45,8 +45,8 @@ class ResearchGoal(BaseModel):
     )
     created_at: datetime = Field(default_factory=datetime.now)
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "question": "How can we use satellite thermal imagery to detect urban heat islands?",
                 "domain": "remote_sensing",
@@ -55,6 +55,7 @@ class ResearchGoal(BaseModel):
                 "keywords": ["urban heat island", "thermal imagery", "Landsat", "MODIS"]
             }
         }
+    )
 
 
 class LiteratureReference(BaseModel):
@@ -79,8 +80,8 @@ class LiteratureReference(BaseModel):
         description="Relevance score to the research goal (0-1)"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "title": "Remote sensing of urban heat islands using Landsat thermal data",
                 "authors": ["Smith, J.", "Johnson, K."],
@@ -92,6 +93,7 @@ class LiteratureReference(BaseModel):
                 "relevance_score": 0.85
             }
         }
+    )
 
 
 class LiteratureSummary(BaseModel):
