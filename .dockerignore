@@ -1,0 +1,91 @@
+# .dockerignore - Exclude files from Docker build context
+# This speeds up builds and reduces image size
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+tests/
+.pytest_cache/
+coverage.xml
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Frontend (built separately)
+frontend/
+node_modules/
+
+# Data and outputs
+data/
+outputs/
+results/
+experiments/
+logs/
+*.log
+chroma_db/
+
+# Secrets and local config
+.env
+.env.*
+*.local
+secrets.yaml
+credentials.json
+config/local/
+
+# CI/CD
+.github/
+.pre-commit-config.yaml
+
+# Misc
+*.pdf
+*.zip
+*.tar.gz
+Makefile
+docker-compose*.yml
